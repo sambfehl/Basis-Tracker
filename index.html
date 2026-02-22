@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basis Tracker — Corn &amp; Soybeans</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .tab-btn        { color: #a7c4b0; border-bottom: 2px solid transparent; transition: color 0.15s; }
+        .tab-btn:hover  { color: #fff; }
+        .tab-btn.active { color: #fff; border-bottom: 2px solid #f0b429; }
+        .label          { display: block; font-size: 0.75rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
+        .input          { width: 100%; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+                          font-size: 0.875rem; outline: none; transition: box-shadow 0.15s, border-color 0.15s; background: #fff; }
+        .input:focus    { box-shadow: 0 0 0 2px rgba(61,107,74,0.35); border-color: #3d6b4a; }
+        .basis-neg      { color: #dc2626; }
+        .basis-pos      { color: #16a34a; }
+        .basis-zero     { color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+
+<!-- ═══════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════ -->
+<header style="background:#132619;" class="text-white shadow-xl">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight">Basis Tracker</h1>
+            <p class="text-green-300 text-xs mt-0.5">Corn &amp; Soybean Local Basis Monitor</p>
+        </div>
+        <div class="text-right text-xs">
+            <div id="currentDate" class="text-green-200 font-medium"></div>
+            <div id="connectionStatus" class="mt-1 text-yellow-300">Connecting…</div>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════════════════════════════════
+     NAV TABS
+═══════════════════════════════════════════ -->
+<nav style="background:#1e3a28;" class="shadow-md sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 flex gap-1">
+        <button onclick="showTab('dashboard')" id="tab-dashboard" class="tab-btn active px-5 py-3 text-sm font-semibold">Dashboard</button>
+        <button onclick="showTab('basis')"     id="tab-basis"     class="tab-btn px-5 py-3 text-sm font-semibold">Update Basis</button>
+        <button onclick="showTab('deal')"      id="tab-deal"      class="tab-btn px-5 py-3 text-sm font-semibold">Log a Deal</button>
+        <button onclick="showTab('history')"   id="tab-history"   class="tab-btn px-5 py-3 text-sm font-semibold">History</button>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     MAIN
+═══════════════════════════════════════════ -->
+<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- ── DASHBOARD ───────────────────────── -->
+    <div id="tab-content-dashboard">
+
+        <!-- Current Basis Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white rounded-xl shadow p-6">
+                <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">🌽 Current Corn Basis</h2>
+                <div id="cornBasisCards"><p class="text-gray-400 text-sm">Loading…</p></div>
+            </div>
+            <div class="bg-white rounded-xl shadow p-6">
+                <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">🫘 Current Soybean Basis</h2>
+                <div id="soyBasisCards"><p class="text-gray-400 text-sm">Loading…</p></div>
+            </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <p class="text-xs text-gray-500 mb-1">Avg Corn Basis (30d)</p>
+                <p id="statCornAvg" class="text-2xl font-bold" style="color:#b8860b;">--</p>
+            </div>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <p class="text-xs text-gray-500 mb-1">Avg Soy Basis (30d)</p>
+                <p id="statSoyAvg" class="text-2xl font-bold" style="color:#b8860b;">--</p>
+            </div>
+            <div class="bg-green-50 border border-green-200 rounded-xl p-4">
+                <p class="text-xs text-gray-500 mb-1">Deals This Month</p>
+                <p id="statDeals" class="text-2xl font-bold" style="color:#2f5438;">--</p>
+            </div>
+            <div class="bg-green-50 border border-green-200 rounded-xl p-4">
+                <p class="text-xs text-gray-500 mb-1">Bu Sold This Month</p>
+                <p id="statBushels" class="text-2xl font-bold" style="color:#2f5438;">--</p>
+            </div>
+        </div>
+
+        <!-- Recent Deals -->
+        <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Recent Deals</h2>
+            <div id="recentDealsSection"><p class="text-gray-400 text-sm">No deals yet.</p></div>
+        </div>
+    </div>
+
+    <!-- ── UPDATE BASIS ─────────────────────── -->
+    <div id="tab-content-basis" class="hidden">
+        <div class="bg-white rounded-xl shadow p-6 max-w-xl">
+            <h2 class="text-base font-semibold text-gray-700 mb-1">Enter Daily Basis</h2>
+            <p class="text-xs text-gray-400 mb-6">Pull numbers from your elevator websites and enter them here each day. Negative = under futures (e.g., -25 = 25 under).</p>
+            <form id="basisForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label">Date</label>
+                        <input type="date" id="bfDate" class="input" required>
+                    </div>
+                    <div>
+                        <label class="label">Commodity</label>
+                        <select id="bfCommodity" class="input" required>
+                            <option value="">Select…</option>
+                            <option value="corn">Corn</option>
+                            <option value="soybeans">Soybeans</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="label">Elevator / Location</label>
+                    <input type="text" id="bfElevator" class="input" placeholder="e.g. Heartland Co-op, ADM Ames" required>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label">Futures Month</label>
+                        <input type="text" id="bfFutures" class="input" placeholder="e.g. May25, Dec25">
+                    </div>
+                    <div>
+                        <label class="label">Basis (¢/bu)</label>
+                        <input type="number" id="bfBasis" step="0.25" class="input font-mono" placeholder="-25" required>
+                    </div>
+                </div>
+                <div>
+                    <label class="label">Cash Price ($/bu) <span class="text-gray-400 font-normal">— optional</span></label>
+                    <input type="number" id="bfCash" step="0.01" class="input" placeholder="4.85">
+                </div>
+                <div>
+                    <label class="label">Notes <span class="text-gray-400 font-normal">— optional</span></label>
+                    <textarea id="bfNotes" rows="2" class="input" placeholder="Any extra details…"></textarea>
+                </div>
+                <button type="submit" class="w-full text-white font-semibold py-2.5 rounded-lg transition text-sm" style="background:#2f5438;" onmouseover="this.style.background='#1e3a28'" onmouseout="this.style.background='#2f5438'">
+                    Save Basis Entry
+                </button>
+                <p id="basisMsg" class="text-sm text-center h-5"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── LOG A DEAL ───────────────────────── -->
+    <div id="tab-content-deal" class="hidden">
+        <div class="bg-white rounded-xl shadow p-6 max-w-xl">
+            <h2 class="text-base font-semibold text-gray-700 mb-1">Log a Cash Sale</h2>
+            <p class="text-xs text-gray-400 mb-6">Record the basis level whenever you make a cash grain deal.</p>
+            <form id="dealForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label">Date of Sale</label>
+                        <input type="date" id="dfDate" class="input" required>
+                    </div>
+                    <div>
+                        <label class="label">Commodity</label>
+                        <select id="dfCommodity" class="input" required>
+                            <option value="">Select…</option>
+                            <option value="corn">Corn</option>
+                            <option value="soybeans">Soybeans</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="label">Elevator / Buyer</label>
+                    <input type="text" id="dfElevator" class="input" placeholder="e.g. Heartland Co-op" required>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label">Basis Level (¢/bu)</label>
+                        <input type="number" id="dfBasis" step="0.25" class="input font-mono" placeholder="-20" required>
+                    </div>
+                    <div>
+                        <label class="label">Futures Month</label>
+                        <input type="text" id="dfFutures" class="input" placeholder="e.g. May25">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label">Bushels Sold</label>
+                        <input type="number" id="dfBushels" step="1" min="1" class="input" placeholder="5000" required>
+                    </div>
+                    <div>
+                        <label class="label">Cash Price ($/bu) <span class="text-gray-400 font-normal">— optional</span></label>
+                        <input type="number" id="dfCash" step="0.01" class="input" placeholder="4.85">
+                    </div>
+                </div>
+                <div>
+                    <label class="label">Notes <span class="text-gray-400 font-normal">— optional</span></label>
+                    <textarea id="dfNotes" rows="2" class="input" placeholder="e.g. Forward contract for April delivery, HTA, etc."></textarea>
+                </div>
+                <button type="submit" class="w-full text-white font-semibold py-2.5 rounded-lg transition text-sm" style="background:#b8860b;" onmouseover="this.style.background='#9a7009'" onmouseout="this.style.background='#b8860b'">
+                    Record Deal
+                </button>
+                <p id="dealMsg" class="text-sm text-center h-5"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── HISTORY ──────────────────────────── -->
+    <div id="tab-content-history" class="hidden space-y-6">
+
+        <!-- Filters -->
+        <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="label">Commodity</label>
+                <select id="hFilter" onchange="loadHistory()" class="input w-36">
+                    <option value="all">All</option>
+                    <option value="corn">Corn</option>
+                    <option value="soybeans">Soybeans</option>
+                </select>
+            </div>
+            <div>
+                <label class="label">From</label>
+                <input type="date" id="hFrom" onchange="loadHistory()" class="input">
+            </div>
+            <div>
+                <label class="label">To</label>
+                <input type="date" id="hTo" onchange="loadHistory()" class="input">
+            </div>
+            <button onclick="loadHistory()" class="text-white text-sm px-4 py-2 rounded-lg transition self-end" style="background:#2f5438;" onmouseover="this.style.background='#1e3a28'" onmouseout="this.style.background='#2f5438'">
+                Refresh
+            </button>
+        </div>
+
+        <!-- Chart -->
+        <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Basis Trend</h2>
+            <canvas id="basisChart" height="90"></canvas>
+        </div>
+
+        <!-- Basis Table -->
+        <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Basis Entries</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                            <th class="text-left px-4 py-2">Date</th>
+                            <th class="text-left px-4 py-2">Commodity</th>
+                            <th class="text-left px-4 py-2">Elevator</th>
+                            <th class="text-left px-4 py-2">Futures</th>
+                            <th class="text-right px-4 py-2">Basis (¢)</th>
+                            <th class="text-right px-4 py-2">Cash</th>
+                            <th class="text-left px-4 py-2">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="basisHistoryBody">
+                        <tr><td colspan="7" class="text-center py-6 text-gray-400">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Deals Table -->
+        <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Deal History</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                            <th class="text-left px-4 py-2">Date</th>
+                            <th class="text-left px-4 py-2">Commodity</th>
+                            <th class="text-left px-4 py-2">Elevator</th>
+                            <th class="text-right px-4 py-2">Basis (¢)</th>
+                            <th class="text-right px-4 py-2">Bushels</th>
+                            <th class="text-right px-4 py-2">Cash</th>
+                            <th class="text-left px-4 py-2">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dealHistoryBody">
+                        <tr><td colspan="7" class="text-center py-6 text-gray-400">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<!-- ═══════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────
+// CONFIGURATION
+// Replace these two values after creating your
+// new Supabase project (see setup guide below).
+// ─────────────────────────────────────────────
+const SUPABASE_URL      = 'https://oarpfbxmmkmhaqdtdmwf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hcnBmYnhtbWttaGFxZHRkbXdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3OTU2MTAsImV4cCI6MjA4NzM3MTYxMH0._6mdzPowUfxwXXvphLP8p9unrsU4HkXswKq_6W7rlWg';
+
+// Init
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let chartInstance = null;
+
+// ─── Helpers ─────────────────────────────────
+const today = () => new Date().toISOString().split('T')[0];
+
+function fmtDate(str) {
+    if (!str) return '--';
+    return new Date(str + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtBasis(v) {
+    if (v === null || v === undefined) return '--';
+    const n = parseFloat(v);
+    return (n > 0 ? '+' : '') + n + '¢';
+}
+
+function basisClass(v) {
+    const n = parseFloat(v);
+    if (n > 0) return 'basis-pos';
+    if (n < 0) return 'basis-neg';
+    return 'basis-zero';
+}
+
+function avg(arr) {
+    if (!arr.length) return null;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function showMsg(id, text, ok = true) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.style.color = ok ? '#16a34a' : '#dc2626';
+    setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+// ─── Tab Nav ──────────────────────────────────
+function showTab(name) {
+    document.querySelectorAll('[id^="tab-content-"]').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('tab-content-' + name).classList.remove('hidden');
+    document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'dashboard') loadDashboard();
+    if (name === 'history')   loadHistory();
+}
+
+// ─── Dashboard ────────────────────────────────
+async function loadDashboard() {
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    const sinceStr = since.toISOString().split('T')[0];
+
+    const { data: basisRows } = await db
+        .from('basis_entries')
+        .select('*')
+        .gte('date', sinceStr)
+        .order('date', { ascending: false });
+
+    if (basisRows) {
+        const seen = {};
+        const latest = [];
+        for (const r of basisRows) {
+            const key = r.commodity + '|' + r.elevator_name;
+            if (!seen[key]) { seen[key] = true; latest.push(r); }
+        }
+        const cornRows = latest.filter(r => r.commodity === 'corn');
+        const soyRows  = latest.filter(r => r.commodity === 'soybeans');
+
+        renderBasisCards('cornBasisCards', cornRows);
+        renderBasisCards('soyBasisCards', soyRows);
+
+        const cAvg = avg(cornRows.map(r => parseFloat(r.basis_value)));
+        const sAvg = avg(soyRows.map(r => parseFloat(r.basis_value)));
+        document.getElementById('statCornAvg').textContent = cAvg !== null ? fmtBasis(cAvg.toFixed(1)) : '--';
+        document.getElementById('statSoyAvg').textContent  = sAvg !== null ? fmtBasis(sAvg.toFixed(1))  : '--';
+    }
+
+    const monthStart = new Date(); monthStart.setDate(1);
+    const { data: monthDeals } = await db
+        .from('deals')
+        .select('*')
+        .gte('date', monthStart.toISOString().split('T')[0]);
+
+    if (monthDeals) {
+        document.getElementById('statDeals').textContent   = monthDeals.length;
+        const bu = monthDeals.reduce((s, r) => s + (parseFloat(r.bushels) || 0), 0);
+        document.getElementById('statBushels').textContent = bu.toLocaleString();
+    }
+
+    const { data: recentDeals } = await db
+        .from('deals')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(10);
+
+    const el = document.getElementById('recentDealsSection');
+    if (!recentDeals || recentDeals.length === 0) {
+        el.innerHTML = '<p class="text-gray-400 text-sm">No deals logged yet. Use the "Log a Deal" tab.</p>';
+    } else {
+        el.innerHTML = `
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                    <th class="text-left px-3 py-2">Date</th>
+                    <th class="text-left px-3 py-2">Commodity</th>
+                    <th class="text-left px-3 py-2">Elevator</th>
+                    <th class="text-right px-3 py-2">Basis (¢)</th>
+                    <th class="text-right px-3 py-2">Bushels</th>
+                    <th class="text-right px-3 py-2">Cash Price</th>
+                    <th class="text-left px-3 py-2">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${recentDeals.map(r => `
+                    <tr class="border-t border-gray-100 hover:bg-gray-50">
+                      <td class="px-3 py-2">${fmtDate(r.date)}</td>
+                      <td class="px-3 py-2 capitalize">${r.commodity}</td>
+                      <td class="px-3 py-2">${r.elevator_name}</td>
+                      <td class="px-3 py-2 text-right font-mono ${basisClass(r.basis_level)}">${fmtBasis(r.basis_level)}</td>
+                      <td class="px-3 py-2 text-right">${parseFloat(r.bushels || 0).toLocaleString()}</td>
+                      <td class="px-3 py-2 text-right">${r.cash_price ? '$' + parseFloat(r.cash_price).toFixed(2) : '--'}</td>
+                      <td class="px-3 py-2 text-gray-500">${r.notes || ''}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>`;
+    }
+}
+
+function renderBasisCards(containerId, rows) {
+    const el = document.getElementById(containerId);
+    if (!rows || rows.length === 0) {
+        el.innerHTML = '<p class="text-gray-400 text-sm">No data yet — add entries in Update Basis.</p>';
+        return;
+    }
+    el.innerHTML = rows.map(r => `
+        <div class="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
+            <div>
+                <div class="font-medium text-gray-800 text-sm">${r.elevator_name}</div>
+                <div class="text-xs text-gray-400">${r.futures_month || '—'} &middot; ${fmtDate(r.date)}</div>
+            </div>
+            <div class="text-right">
+                <div class="text-xl font-bold ${basisClass(r.basis_value)}">${fmtBasis(r.basis_value)}</div>
+                ${r.cash_price ? `<div class="text-xs text-gray-500">$${parseFloat(r.cash_price).toFixed(2)}/bu</div>` : ''}
+            </div>
+        </div>`).join('');
+}
+
+// ─── Basis Form ───────────────────────────────
+document.getElementById('basisForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const { error } = await db.from('basis_entries').insert({
+        date:          document.getElementById('bfDate').value,
+        commodity:     document.getElementById('bfCommodity').value,
+        elevator_name: document.getElementById('bfElevator').value,
+        futures_month: document.getElementById('bfFutures').value || null,
+        basis_value:   parseFloat(document.getElementById('bfBasis').value),
+        cash_price:    document.getElementById('bfCash').value ? parseFloat(document.getElementById('bfCash').value) : null,
+        notes:         document.getElementById('bfNotes').value || null,
+    });
+
+    btn.disabled = false; btn.textContent = 'Save Basis Entry';
+
+    if (error) {
+        showMsg('basisMsg', 'Error: ' + error.message, false);
+    } else {
+        showMsg('basisMsg', 'Basis entry saved!');
+        e.target.reset();
+        document.getElementById('bfDate').value = today();
+    }
+});
+
+// ─── Deal Form ────────────────────────────────
+document.getElementById('dealForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const { error } = await db.from('deals').insert({
+        date:          document.getElementById('dfDate').value,
+        commodity:     document.getElementById('dfCommodity').value,
+        elevator_name: document.getElementById('dfElevator').value,
+        basis_level:   parseFloat(document.getElementById('dfBasis').value),
+        futures_month: document.getElementById('dfFutures').value || null,
+        bushels:       parseFloat(document.getElementById('dfBushels').value),
+        cash_price:    document.getElementById('dfCash').value ? parseFloat(document.getElementById('dfCash').value) : null,
+        notes:         document.getElementById('dfNotes').value || null,
+    });
+
+    btn.disabled = false; btn.textContent = 'Record Deal';
+
+    if (error) {
+        showMsg('dealMsg', 'Error: ' + error.message, false);
+    } else {
+        showMsg('dealMsg', 'Deal recorded!');
+        e.target.reset();
+        document.getElementById('dfDate').value = today();
+    }
+});
+
+// ─── History ──────────────────────────────────
+async function loadHistory() {
+    const commodity = document.getElementById('hFilter').value;
+    const from      = document.getElementById('hFrom').value;
+    const to        = document.getElementById('hTo').value;
+
+    let bq = db.from('basis_entries').select('*').order('date', { ascending: false }).limit(500);
+    if (commodity !== 'all') bq = bq.eq('commodity', commodity);
+    if (from) bq = bq.gte('date', from);
+    if (to)   bq = bq.lte('date', to);
+    const { data: bData } = await bq;
+
+    const bTbody = document.getElementById('basisHistoryBody');
+    if (!bData || bData.length === 0) {
+        bTbody.innerHTML = '<tr><td colspan="7" class="text-center py-6 text-gray-400">No basis entries found.</td></tr>';
+    } else {
+        bTbody.innerHTML = bData.map(r => `
+            <tr class="border-t border-gray-100 hover:bg-gray-50">
+                <td class="px-4 py-2 whitespace-nowrap">${fmtDate(r.date)}</td>
+                <td class="px-4 py-2 capitalize">${r.commodity}</td>
+                <td class="px-4 py-2">${r.elevator_name}</td>
+                <td class="px-4 py-2">${r.futures_month || '--'}</td>
+                <td class="px-4 py-2 text-right font-mono ${basisClass(r.basis_value)}">${fmtBasis(r.basis_value)}</td>
+                <td class="px-4 py-2 text-right">${r.cash_price ? '$' + parseFloat(r.cash_price).toFixed(2) : '--'}</td>
+                <td class="px-4 py-2 text-gray-500 text-xs">${r.notes || ''}</td>
+            </tr>`).join('');
+    }
+
+    let dq = db.from('deals').select('*').order('date', { ascending: false }).limit(500);
+    if (commodity !== 'all') dq = dq.eq('commodity', commodity);
+    if (from) dq = dq.gte('date', from);
+    if (to)   dq = dq.lte('date', to);
+    const { data: dData } = await dq;
+
+    const dTbody = document.getElementById('dealHistoryBody');
+    if (!dData || dData.length === 0) {
+        dTbody.innerHTML = '<tr><td colspan="7" class="text-center py-6 text-gray-400">No deals found.</td></tr>';
+    } else {
+        dTbody.innerHTML = dData.map(r => `
+            <tr class="border-t border-gray-100 hover:bg-gray-50">
+                <td class="px-4 py-2 whitespace-nowrap">${fmtDate(r.date)}</td>
+                <td class="px-4 py-2 capitalize">${r.commodity}</td>
+                <td class="px-4 py-2">${r.elevator_name}</td>
+                <td class="px-4 py-2 text-right font-mono ${basisClass(r.basis_level)}">${fmtBasis(r.basis_level)}</td>
+                <td class="px-4 py-2 text-right">${parseFloat(r.bushels || 0).toLocaleString()}</td>
+                <td class="px-4 py-2 text-right">${r.cash_price ? '$' + parseFloat(r.cash_price).toFixed(2) : '--'}</td>
+                <td class="px-4 py-2 text-gray-500 text-xs">${r.notes || ''}</td>
+            </tr>`).join('');
+    }
+
+    buildChart(bData || []);
+}
+
+function buildChart(rows) {
+    const ctx = document.getElementById('basisChart').getContext('2d');
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+    const cornMap = {}, soyMap = {};
+    for (const r of [...rows].reverse()) {
+        const d = r.date;
+        if (r.commodity === 'corn') {
+            cornMap[d] = cornMap[d] || []; cornMap[d].push(parseFloat(r.basis_value));
+        } else {
+            soyMap[d] = soyMap[d] || []; soyMap[d].push(parseFloat(r.basis_value));
+        }
+    }
+    const allDates = [...new Set([...Object.keys(cornMap), ...Object.keys(soyMap)])].sort();
+    const cornVals = allDates.map(d => cornMap[d] ? avg(cornMap[d]) : null);
+    const soyVals  = allDates.map(d => soyMap[d]  ? avg(soyMap[d])  : null);
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: allDates.map(d => fmtDate(d)),
+            datasets: [
+                {
+                    label: 'Corn Basis (¢/bu)',
+                    data: cornVals,
+                    borderColor: '#d4a017',
+                    backgroundColor: 'rgba(212,160,23,0.08)',
+                    borderWidth: 2, pointRadius: 4, tension: 0.25, spanGaps: true,
+                },
+                {
+                    label: 'Soybean Basis (¢/bu)',
+                    data: soyVals,
+                    borderColor: '#3d6b4a',
+                    backgroundColor: 'rgba(61,107,74,0.08)',
+                    borderWidth: 2, pointRadius: 4, tension: 0.25, spanGaps: true,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top' } },
+            scales: { y: { title: { display: true, text: 'Basis (¢/bu)' } } }
+        }
+    });
+}
+
+// ─── Connection Check ─────────────────────────
+async function checkConnection() {
+    const el = document.getElementById('connectionStatus');
+    if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+        el.textContent = '⚠ Add your Supabase credentials (see setup guide)';
+        el.style.color = '#fcd34d';
+        return;
+    }
+    const { error } = await db.from('basis_entries').select('id').limit(1);
+    if (error) {
+        el.textContent = '✗ DB error — check console';
+        el.style.color = '#fca5a5';
+    } else {
+        el.textContent = '✓ Connected';
+        el.style.color = '#86efac';
+    }
+}
+
+// ─── Boot ─────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    document.getElementById('bfDate').value = today();
+    document.getElementById('dfDate').value = today();
+
+    const d90 = new Date(); d90.setDate(d90.getDate() - 90);
+    document.getElementById('hFrom').value = d90.toISOString().split('T')[0];
+    document.getElementById('hTo').value   = today();
+
+    checkConnection();
+    loadDashboard();
+});
+</script>
+</body>
+</html>
