@@ -1,4 +1,3 @@
-const chromium = require('@sparticuz/chromium-min');
 const puppeteer = require('puppeteer-core');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -21,20 +20,14 @@ module.exports = async function handler(req, res) {
   let browser = null;
 
   try {
-    // ── Launch headless browser ──────────────────────────────
-    log.push('Launching browser...');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(
-        'https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar'
-      ),
-      headless: chromium.headless,
+    // ── Connect to Browserless (remote headless browser) ─────
+    log.push('Connecting to Browserless...');
+    browser = await puppeteer.connect({
+      browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`,
     });
 
     const page = await browser.newPage();
 
-    // Look like a real browser so we don't get blocked
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
@@ -57,7 +50,6 @@ module.exports = async function handler(req, res) {
 
     // ── Extract data from page ───────────────────────────────
     const extracted = await page.evaluate(() => {
-      // Grab all table data
       const tables = Array.from(document.querySelectorAll('table'));
       const tableData = tables.map(table => {
         const rows = Array.from(table.querySelectorAll('tr'));
@@ -67,11 +59,8 @@ module.exports = async function handler(req, res) {
         }).filter(row => row.length > 0);
       });
 
-      // Also check iframes (Barchart sometimes embeds one)
       const iframes = Array.from(document.querySelectorAll('iframe'));
       const iframeSrcs = iframes.map(f => f.src);
-
-      // Grab a snippet of the visible page text for debugging
       const bodySnippet = document.body.innerText.substring(0, 4000);
 
       return { tableData, iframeSrcs, bodySnippet };
@@ -90,49 +79,33 @@ module.exports = async function handler(req, res) {
       for (const row of table) {
         const rowText = row.join(' ').toLowerCase();
 
-        // Identify commodity
         let commodity = null;
-        if (rowText.includes('corn') && !rowText.includes('popcorn')) {
-          commodity = 'corn';
-        } else if (rowText.includes('soybean') || rowText.includes('soy bean')) {
-          commodity = 'soybeans';
-        }
+        if (rowText.includes('corn') && !rowText.includes('popcorn')) commodity = 'corn';
+        else if (rowText.includes('soybean') || rowText.includes('soy bean')) commodity = 'soybeans';
         if (!commodity) continue;
 
-        // Pull all numbers from the row
         const numbers = row
           .map(cell => cell.replace(/[$,\s]/g, ''))
           .filter(cell => /^-?\d+(\.\d{1,4})?$/.test(cell))
           .map(Number);
-
         if (numbers.length < 1) continue;
 
-        // Heuristic parsing:
-        // - Cash price:  likely $2–$20 range
-        // - Basis:       likely -200 to +200 (cents)
         let cashPrice = null;
         let basisValue = null;
-
         for (const n of numbers) {
-          if (n >= 2 && n <= 20 && cashPrice === null) {
-            cashPrice = n;
-          }
-          if (n >= -200 && n <= 200 && Math.abs(n) > 0.5 && basisValue === null && !(n >= 2 && n <= 20)) {
-            basisValue = n;
-          }
+          if (n >= 2 && n <= 20 && cashPrice === null) cashPrice = n;
+          if (n >= -200 && n <= 200 && Math.abs(n) > 0.5 && basisValue === null && !(n >= 2 && n <= 20)) basisValue = n;
         }
 
-        // Look for futures month string (e.g. "Jul25", "December 2025")
         const futuresMatch = row.join(' ').match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{2,4}\b/i);
         const futuresMonth = futuresMatch ? futuresMatch[0].trim() : null;
 
-        // Skip if we couldn't find a basis value
         if (basisValue === null) {
           skipped.push({ row, reason: 'Could not identify basis value' });
           continue;
         }
 
-        // Skip duplicate entries for same date/commodity/elevator
+        // Skip duplicates
         const { data: existing } = await db
           .from('basis_entries')
           .select('id')
@@ -142,11 +115,10 @@ module.exports = async function handler(req, res) {
           .limit(1);
 
         if (existing && existing.length > 0) {
-          skipped.push({ row, reason: `Entry already exists for ${commodity} on ${today}` });
+          skipped.push({ row, reason: `Already exists for ${commodity} on ${today}` });
           continue;
         }
 
-        // Save to Supabase
         const entry = {
           date: today,
           commodity,
@@ -158,9 +130,8 @@ module.exports = async function handler(req, res) {
         };
 
         const { error } = await db.from('basis_entries').insert(entry);
-        if (error) {
-          parseErrors.push(error.message);
-        } else {
+        if (error) parseErrors.push(error.message);
+        else {
           saved.push(entry);
           log.push(`Saved: ${commodity} basis ${basisValue}¢`);
         }
@@ -176,7 +147,6 @@ module.exports = async function handler(req, res) {
       saved,
       skipped,
       errors: parseErrors,
-      // Full debug output so we can fix selectors if needed
       debug: {
         tableData: extracted.tableData,
         iframeSrcs: extracted.iframeSrcs,
@@ -187,7 +157,6 @@ module.exports = async function handler(req, res) {
   } catch (err) {
     if (browser) await browser.close();
     log.push('Fatal error: ' + err.message);
-    console.error(err);
     return res.status(500).json({ success: false, error: err.message, log });
   }
 };
