@@ -6,7 +6,6 @@
     "node": "20.x"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0",
-    "puppeteer-core": "^23.0.0"
+    "@supabase/supabase-js": "^2.0.0"
   }
 }
