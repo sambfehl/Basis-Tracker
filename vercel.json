@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "api/fetch-basis.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/fetch-basis",
+      "schedule": "0 13 * * 1-5"
+    }
+  ]
+}
