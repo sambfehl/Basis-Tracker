@@ -1,11 +1,31 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// ─── Config ───────────────────────────────────────────────────
-// Mid-Iowa stores their cash bids in a public Google Sheet
-const SHEETS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRLEymqTHUmyKr6r7HqlgyOmAZtgthB5hB3CilPhPhaaK4T-7LNjJfjGQlm5FtEdmbBFWadlSOkPmak/pub?gid=0&single=true&output=csv';
-const ELEVATOR_NAME = 'Mid-Iowa Cooperative';
+// ─────────────────────────────────────────────────────────────
+// SOURCE 1: midiowa.agricharts.com
+// Uses writeBidRow() format
+// ─────────────────────────────────────────────────────────────
+const AGRICHARTS_BASE = 'https://midiowa.agricharts.com/markets/cash.php?location_filter=';
 
-// ─── Handler ──────────────────────────────────────────────────
+const AGRICHARTS_LOCATIONS = [
+  { name: 'ADM Cedar Rapids',     id: 66521, commodities: ['corn'] },
+  { name: 'Cargill Cedar Rapids', id: 75163, commodities: ['corn', 'soybeans'] },
+  { name: 'Shell Rock Soy',       id: 82509, commodities: ['soybeans'] },
+  { name: 'La Porte City',        id: 64477, commodities: ['corn'] },
+];
+
+// ─────────────────────────────────────────────────────────────
+// SOURCE 2: tamabentoncoop.com
+// Uses writeBidCell() format — ZC = corn, ZS = soybeans
+// ─────────────────────────────────────────────────────────────
+const TAMABENTON_URL = 'https://tamabentoncoop.com/markets/cashgrid.php?basis=1&showenddate=1&dateformat=%25m/%25d/%25y';
+
+const TAMABENTON_LOCATIONS = [
+  { name: 'Vinton (Tama-Benton)', id: 3076, commodities: ['corn'] },
+];
+
+// ─────────────────────────────────────────────────────────────
+// HANDLER
+// ─────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -16,129 +36,142 @@ module.exports = async function handler(req, res) {
     process.env.SUPABASE_ANON_KEY
   );
 
-  const log = [];
+  const today   = new Date().toISOString().split('T')[0];
+  const log     = [];
+  const saved   = [];
+  const skipped = [];
+  const errors  = [];
 
-  try {
-    // ── Fetch CSV directly from Google Sheets ────────────────
-    log.push('Fetching Google Sheets CSV...');
-    const response = await fetch(SHEETS_CSV_URL);
+  // ── Fetch & save a single entry ──────────────────────────
+  async function saveEntry(name, commodity, basisValue, futuresMonth) {
+    const { data: existing } = await db
+      .from('basis_entries')
+      .select('id')
+      .eq('date', today)
+      .eq('commodity', commodity)
+      .eq('elevator_name', name)
+      .limit(1);
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch sheet: HTTP ${response.status}`);
+    if (existing && existing.length > 0) {
+      skipped.push(`${name} ${commodity} already saved for ${today}`);
+      return;
     }
 
-    const csvText = await response.text();
-    log.push('CSV fetched successfully.');
+    const entry = {
+      date:          today,
+      commodity,
+      elevator_name: name,
+      basis_value:   basisValue,
+      futures_month: futuresMonth || null,
+      notes:         'Auto-imported',
+    };
 
-    // ── Parse CSV rows ───────────────────────────────────────
-    // Handle quoted cells that may contain commas
-    const rows = csvText.split('\n').map(line => {
-      const cells = [];
-      let current = '';
-      let inQuotes = false;
-      for (const char of line) {
-        if (char === '"') { inQuotes = !inQuotes; }
-        else if (char === ',' && !inQuotes) { cells.push(current.trim()); current = ''; }
-        else { current += char; }
-      }
-      cells.push(current.trim());
-      return cells;
-    }).filter(row => row.some(cell => cell.length > 0));
-
-    log.push(`Total rows in sheet: ${rows.length}`);
-    log.push('First 8 rows: ' + JSON.stringify(rows.slice(0, 8)));
-
-    // ── Extract grain data ───────────────────────────────────
-    const today = new Date().toISOString().split('T')[0];
-    const saved = [];
-    const skipped = [];
-    const parseErrors = [];
-
-    for (const row of rows) {
-      const rowText = row.join(' ').toLowerCase();
-
-      // Identify commodity
-      let commodity = null;
-      if (rowText.includes('corn') && !rowText.includes('popcorn')) commodity = 'corn';
-      else if (rowText.includes('soybean') || rowText.includes('soy bean')) commodity = 'soybeans';
-      if (!commodity) continue;
-
-      // Extract all numbers from the row
-      const numbers = row
-        .map(cell => cell.replace(/[$,]/g, '').trim())
-        .filter(cell => /^-?\d+(\.\d{1,4})?$/.test(cell))
-        .map(Number);
-
-      if (numbers.length < 1) continue;
-
-      // Heuristic:
-      //   Cash price = $2.00–$20.00 range
-      //   Basis      = -200 to +200 cents (not in cash price range)
-      let cashPrice = null;
-      let basisValue = null;
-      for (const n of numbers) {
-        if (n >= 2 && n <= 20 && cashPrice === null) cashPrice = n;
-        if (n >= -200 && n <= 200 && Math.abs(n) > 0.5 && basisValue === null && !(n >= 2 && n <= 20)) basisValue = n;
-      }
-
-      // Look for futures month (e.g. "May25", "Jul 2025")
-      const futuresMatch = row.join(' ').match(
-        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{2,4}\b/i
-      );
-      const futuresMonth = futuresMatch ? futuresMatch[0].trim() : null;
-
-      if (basisValue === null) {
-        skipped.push({ row, reason: 'Could not identify basis value' });
-        continue;
-      }
-
-      // Skip if already saved today
-      const { data: existing } = await db
-        .from('basis_entries')
-        .select('id')
-        .eq('date', today)
-        .eq('commodity', commodity)
-        .eq('elevator_name', ELEVATOR_NAME)
-        .limit(1);
-
-      if (existing && existing.length > 0) {
-        skipped.push({ row, reason: `Already saved for ${commodity} on ${today}` });
-        continue;
-      }
-
-      // Save to Supabase
-      const entry = {
-        date: today,
-        commodity,
-        elevator_name: ELEVATOR_NAME,
-        basis_value: basisValue,
-        cash_price: cashPrice,
-        futures_month: futuresMonth,
-        notes: 'Auto-imported from Google Sheet',
-      };
-
-      const { error } = await db.from('basis_entries').insert(entry);
-      if (error) {
-        parseErrors.push(error.message);
-      } else {
-        saved.push(entry);
-        log.push(`Saved: ${commodity} | basis ${basisValue}¢ | cash $${cashPrice}`);
-      }
+    const { error } = await db.from('basis_entries').insert(entry);
+    if (error) {
+      errors.push(`${name} ${commodity}: ${error.message}`);
+    } else {
+      saved.push(entry);
+      log.push(`  ✓ ${name} | ${commodity} | ${basisValue}¢ (${futuresMonth || '—'})`);
     }
-
-    return res.status(200).json({
-      success: true,
-      message: `Saved ${saved.length} entries.`,
-      log,
-      saved,
-      skipped,
-      errors: parseErrors,
-      debug: { allRows: rows.slice(0, 20) },
-    });
-
-  } catch (err) {
-    log.push('Fatal error: ' + err.message);
-    console.error(err);
-    return res.status(500).json({ success: false, error: err.message, log });
   }
+
+  // ════════════════════════════════════════════════════════
+  // SOURCE 1 — midiowa.agricharts.com
+  // writeBidRow('Commodity', basis, false, false, false, 0.75, 'Month Year', ...)
+  // ════════════════════════════════════════════════════════
+  for (const loc of AGRICHARTS_LOCATIONS) {
+    log.push(`Fetching ${loc.name}...`);
+    try {
+      const res1 = await fetch(AGRICHARTS_BASE + loc.id);
+      if (!res1.ok) { errors.push(`${loc.name}: HTTP ${res1.status}`); continue; }
+      const html = await res1.text();
+
+      // Extract writeBidRow calls — capture commodity, basis, delivery date
+      const regex = /writeBidRow\('([^']+)',\s*(-?\d+(?:\.\d+)?),(?:[^,]*,){4}\s*'([^']+)'/g;
+      const bids  = {};
+      let m;
+
+      while ((m = regex.exec(html)) !== null) {
+        const raw  = m[1].toLowerCase();
+        const basis = parseFloat(m[2]);
+        const month = m[3].trim();
+
+        let commodity = null;
+        if (raw.includes('corn'))    commodity = 'corn';
+        if (raw.includes('soybean')) commodity = 'soybeans';
+        if (!commodity || !loc.commodities.includes(commodity)) continue;
+        if (!bids[commodity]) bids[commodity] = { basis, month }; // keep nearest only
+      }
+
+      for (const [commodity, bid] of Object.entries(bids)) {
+        await saveEntry(loc.name, commodity, bid.basis, bid.month);
+      }
+
+      if (!Object.keys(bids).length) log.push(`  ⚠ No matching bids found`);
+
+    } catch (err) {
+      errors.push(`${loc.name}: ${err.message}`);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════
+  // SOURCE 2 — tamabentoncoop.com
+  // writeBidCell(basis, ..., 'c=X&l=LOCID&d=MONTH', ..., quotes['SYMBOL'])
+  // ZC prefix = corn, ZS prefix = soybeans
+  // ════════════════════════════════════════════════════════
+  log.push('Fetching Tama-Benton (Vinton)...');
+  try {
+    const res2 = await fetch(TAMABENTON_URL);
+    if (!res2.ok) {
+      errors.push(`Tama-Benton: HTTP ${res2.status}`);
+    } else {
+      const html = await res2.text();
+
+      // Capture: basis value, location ID, futures symbol
+      const regex = /writeBidCell\((-?\d+(?:\.\d+)?),(?:[^,]*,){4}\s*'c=\d+&l=(\d+)&[^']*',(?:[^,]*,){1}\s*quotes\['(Z[A-Z]+\d+)'\]/g;
+      const bids  = {};
+      let m;
+
+      while ((m = regex.exec(html)) !== null) {
+        const basis    = parseFloat(m[1]);
+        const locId    = parseInt(m[2]);
+        const symbol   = m[3]; // e.g. ZCH26 or ZSH26
+
+        // Match location
+        const loc = TAMABENTON_LOCATIONS.find(l => l.id === locId);
+        if (!loc) continue;
+
+        // Determine commodity from futures symbol prefix
+        let commodity = null;
+        if (symbol.startsWith('ZC')) commodity = 'corn';
+        if (symbol.startsWith('ZS')) commodity = 'soybeans';
+        if (!commodity || !loc.commodities.includes(commodity)) continue;
+
+        if (!bids[`${locId}-${commodity}`]) {
+          bids[`${locId}-${commodity}`] = { loc, commodity, basis, symbol };
+        }
+      }
+
+      for (const bid of Object.values(bids)) {
+        await saveEntry(bid.loc.name, bid.commodity, bid.basis, bid.symbol);
+      }
+
+      if (!Object.keys(bids).length) log.push('  ⚠ No matching Tama-Benton bids found');
+    }
+  } catch (err) {
+    errors.push(`Tama-Benton: ${err.message}`);
+  }
+
+  // ── Summary ──────────────────────────────────────────────
+  const expected = AGRICHARTS_LOCATIONS.reduce((n, l) => n + l.commodities.length, 0)
+                 + TAMABENTON_LOCATIONS.reduce((n, l) => n + l.commodities.length, 0);
+
+  return res.status(200).json({
+    success: true,
+    message: `Saved ${saved.length} of ${expected} expected entries.`,
+    log,
+    saved,
+    skipped,
+    errors,
+  });
 };
