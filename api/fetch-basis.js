@@ -7,10 +7,14 @@ const { createClient } = require('@supabase/supabase-js');
 const AGRICHARTS_BASE = 'https://midiowa.agricharts.com/markets/cash.php?location_filter=';
 
 const AGRICHARTS_LOCATIONS = [
-  { name: 'ADM Cedar Rapids',     id: 66521, commodities: ['corn'] },
-  { name: 'Cargill Cedar Rapids', id: 75163, commodities: ['corn', 'soybeans'] },
-  { name: 'Shell Rock Soy',       id: 82509, commodities: ['soybeans'] },
-  { name: 'La Porte City',        id: 64477, commodities: ['corn'] },
+  { name: 'ADM Cedar Rapids',              id: 66521, commodities: ['corn'] },
+  { name: 'Cargill Cedar Rapids (Corn Mill)', id: 26279, commodities: ['corn'] },
+  { name: 'Cargill Cedar Rapids',          id: 75163, commodities: ['soybeans'] },
+  { name: 'Shell Rock Soy',                  id: 82509, commodities: ['soybeans'] },
+  { name: 'La Porte City',                   id: 64477, commodities: ['corn'] },
+  { name: 'Pine Lake Corn Processors',       id: 75160, commodities: ['corn'] },
+  { name: 'POET Fairbank',                   id: 79809, commodities: ['corn'] },
+  { name: 'Sinclair (Mid-Iowa)',             id: 81965, commodities: ['corn'] },
 ];
 
 // ─────────────────────────────────────────────────────────────
