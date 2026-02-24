@@ -18,6 +18,19 @@
         .basis-neg      { color: #dc2626; }
         .basis-pos      { color: #16a34a; }
         .basis-zero     { color: #6b7280; }
+
+        /* Calendar */
+        .cal-day        { position: relative; text-align: center; padding: 0.5rem 0.25rem; border-radius: 0.5rem;
+                          font-size: 0.875rem; min-height: 2.5rem; display: flex; flex-direction: column;
+                          align-items: center; justify-content: center; }
+        .cal-day.has-data { cursor: pointer; font-weight: 600; color: #1a3622; }
+        .cal-day.has-data:hover { background: #dcfce7; }
+        .cal-day.selected { background: #166534 !important; color: #fff !important; }
+        .cal-day.selected .cal-dot { background: #fff !important; }
+        .cal-day.is-today { box-shadow: inset 0 0 0 2px #16a34a; }
+        .cal-day.no-data  { color: #d1d5db; }
+        .cal-dot          { width: 6px; height: 6px; border-radius: 50%; background: #16a34a;
+                            margin-top: 2px; flex-shrink: 0; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen font-sans">
@@ -206,56 +219,47 @@
     <!-- ── HISTORY ──────────────────────────── -->
     <div id="tab-content-history" class="hidden space-y-6">
 
-        <!-- Filters -->
-        <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
-            <div>
-                <label class="label">Commodity</label>
-                <select id="hFilter" onchange="loadHistory()" class="input w-36">
-                    <option value="all">All</option>
-                    <option value="corn">Corn</option>
-                    <option value="soybeans">Soybeans</option>
-                </select>
+        <!-- Calendar -->
+        <div class="bg-white rounded-xl shadow p-6">
+            <div class="flex items-center justify-between mb-5">
+                <button onclick="prevMonth()" class="flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition">
+                    ← Prev
+                </button>
+                <h2 id="calMonthLabel" class="text-base font-semibold text-gray-700"></h2>
+                <button onclick="nextMonth()" class="flex items-center gap-1 text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition">
+                    Next →
+                </button>
             </div>
-            <div>
-                <label class="label">From</label>
-                <input type="date" id="hFrom" onchange="loadHistory()" class="input">
+            <!-- Day-of-week headers -->
+            <div class="grid grid-cols-7 gap-1 mb-1">
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Sun</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Mon</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Tue</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Wed</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Thu</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Fri</div>
+                <div class="text-center text-xs font-semibold text-gray-400 py-1">Sat</div>
             </div>
-            <div>
-                <label class="label">To</label>
-                <input type="date" id="hTo" onchange="loadHistory()" class="input">
+            <div id="calGrid" class="grid grid-cols-7 gap-1"></div>
+            <div class="mt-4 flex items-center gap-3 text-xs text-gray-400">
+                <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-green-500"></span> Has data</span>
+                <span class="flex items-center gap-1"><span class="inline-block w-4 h-4 rounded border-2 border-green-600"></span> Today</span>
             </div>
-            <button onclick="loadHistory()" class="text-white text-sm px-4 py-2 rounded-lg transition self-end" style="background:#2f5438;" onmouseover="this.style.background='#1e3a28'" onmouseout="this.style.background='#2f5438'">
-                Refresh
-            </button>
         </div>
 
-        <!-- Chart -->
+        <!-- Day Detail Panel -->
+        <div id="dayDetail" class="bg-white rounded-xl shadow p-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 id="dayDetailTitle" class="text-sm font-semibold text-gray-600 uppercase tracking-wide"></h2>
+                <button onclick="closeDayDetail()" class="text-gray-400 hover:text-gray-600 text-xs px-2 py-1 border border-gray-200 rounded-lg">Close ✕</button>
+            </div>
+            <div id="dayDetailContent"></div>
+        </div>
+
+        <!-- Trend Chart -->
         <div class="bg-white rounded-xl shadow p-6">
-            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Basis Trend</h2>
+            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Basis Trend (Last 90 Days)</h2>
             <canvas id="basisChart" height="90"></canvas>
-        </div>
-
-        <!-- Basis Table -->
-        <div class="bg-white rounded-xl shadow p-6">
-            <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Basis Entries</h2>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
-                            <th class="text-left px-4 py-2">Date</th>
-                            <th class="text-left px-4 py-2">Commodity</th>
-                            <th class="text-left px-4 py-2">Elevator</th>
-                            <th class="text-left px-4 py-2">Futures</th>
-                            <th class="text-right px-4 py-2">Basis (¢)</th>
-                            <th class="text-right px-4 py-2">Cash</th>
-                            <th class="text-left px-4 py-2">Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody id="basisHistoryBody">
-                        <tr><td colspan="7" class="text-center py-6 text-gray-400">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
         </div>
 
         <!-- Deals Table -->
@@ -290,8 +294,6 @@
 <script>
 // ─────────────────────────────────────────────
 // CONFIGURATION
-// Replace these two values after creating your
-// new Supabase project (see setup guide below).
 // ─────────────────────────────────────────────
 const SUPABASE_URL      = 'https://oarpfbxmmkmhaqdtdmwf.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hcnBmYnhtbWttaGFxZHRkbXdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3OTU2MTAsImV4cCI6MjA4NzM3MTYxMH0._6mdzPowUfxwXXvphLP8p9unrsU4HkXswKq_6W7rlWg';
@@ -502,39 +504,154 @@ document.getElementById('dealForm').addEventListener('submit', async e => {
     }
 });
 
-// ─── History ──────────────────────────────────
+// ─── History / Calendar ───────────────────────
+let calYear, calMonth, calSelectedDate;
+let allBasisData = [];
+
 async function loadHistory() {
-    const commodity = document.getElementById('hFilter').value;
-    const from      = document.getElementById('hFrom').value;
-    const to        = document.getElementById('hTo').value;
+    // Load last 6 months of basis data for calendar + chart
+    const since = new Date();
+    since.setMonth(since.getMonth() - 6);
+    const sinceStr = since.toISOString().split('T')[0];
 
-    let bq = db.from('basis_entries').select('*').order('date', { ascending: false }).limit(500);
-    if (commodity !== 'all') bq = bq.eq('commodity', commodity);
-    if (from) bq = bq.gte('date', from);
-    if (to)   bq = bq.lte('date', to);
-    const { data: bData } = await bq;
+    const { data } = await db
+        .from('basis_entries')
+        .select('*')
+        .gte('date', sinceStr)
+        .order('date', { ascending: false });
 
-    const bTbody = document.getElementById('basisHistoryBody');
-    if (!bData || bData.length === 0) {
-        bTbody.innerHTML = '<tr><td colspan="7" class="text-center py-6 text-gray-400">No basis entries found.</td></tr>';
-    } else {
-        bTbody.innerHTML = bData.map(r => `
-            <tr class="border-t border-gray-100 hover:bg-gray-50">
-                <td class="px-4 py-2 whitespace-nowrap">${fmtDate(r.date)}</td>
-                <td class="px-4 py-2 capitalize">${r.commodity}</td>
-                <td class="px-4 py-2">${r.elevator_name}</td>
-                <td class="px-4 py-2">${r.futures_month || '--'}</td>
-                <td class="px-4 py-2 text-right font-mono ${basisClass(r.basis_value)}">${fmtBasis(r.basis_value)}</td>
-                <td class="px-4 py-2 text-right">${r.cash_price ? '$' + parseFloat(r.cash_price).toFixed(2) : '--'}</td>
-                <td class="px-4 py-2 text-gray-500 text-xs">${r.notes || ''}</td>
-            </tr>`).join('');
+    allBasisData = data || [];
+
+    // Init calendar to current month if not already set
+    if (!calYear) {
+        const now = new Date();
+        calYear  = now.getFullYear();
+        calMonth = now.getMonth();
     }
 
-    let dq = db.from('deals').select('*').order('date', { ascending: false }).limit(500);
-    if (commodity !== 'all') dq = dq.eq('commodity', commodity);
-    if (from) dq = dq.gte('date', from);
-    if (to)   dq = dq.lte('date', to);
-    const { data: dData } = await dq;
+    renderCalendar();
+    buildChart(allBasisData);
+    loadDealsTable();
+}
+
+function renderCalendar() {
+    const daysWithData = new Set(allBasisData.map(r => r.date));
+    const todayStr     = today();
+
+    const label = new Date(calYear, calMonth, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    document.getElementById('calMonthLabel').textContent = label;
+
+    const firstDay    = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+    const grid = document.getElementById('calGrid');
+    grid.innerHTML = '';
+
+    // Empty cells before first day of month
+    for (let i = 0; i < firstDay; i++) {
+        grid.innerHTML += '<div></div>';
+    }
+
+    // Day cells
+    for (let d = 1; d <= daysInMonth; d++) {
+        const mm      = String(calMonth + 1).padStart(2, '0');
+        const dd      = String(d).padStart(2, '0');
+        const dateStr = `${calYear}-${mm}-${dd}`;
+        const hasData = daysWithData.has(dateStr);
+        const isToday = dateStr === todayStr;
+        const isSel   = dateStr === calSelectedDate;
+
+        const classes = [
+            'cal-day',
+            hasData  ? 'has-data' : 'no-data',
+            isToday  ? 'is-today' : '',
+            isSel    ? 'selected' : '',
+        ].join(' ');
+
+        const click = hasData ? `onclick="selectDay('${dateStr}')"` : '';
+
+        grid.innerHTML += `
+            <div class="${classes}" ${click}>
+                ${d}
+                ${hasData ? '<div class="cal-dot"></div>' : ''}
+            </div>`;
+    }
+}
+
+function selectDay(dateStr) {
+    calSelectedDate = dateStr;
+    renderCalendar(); // re-render to update selected highlight
+
+    const dayData = allBasisData.filter(r => r.date === dateStr);
+    const corn    = dayData.filter(r => r.commodity === 'corn').sort((a,b) => a.elevator_name.localeCompare(b.elevator_name));
+    const soy     = dayData.filter(r => r.commodity === 'soybeans').sort((a,b) => a.elevator_name.localeCompare(b.elevator_name));
+
+    document.getElementById('dayDetailTitle').textContent = fmtDate(dateStr) + ' — All Locations';
+
+    let html = '';
+
+    if (corn.length) {
+        html += `<p class="text-xs font-semibold uppercase tracking-wide text-yellow-700 mb-2">🌽 Corn</p>`;
+        html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-5">`;
+        html += corn.map(r => `
+            <div class="flex items-center justify-between bg-yellow-50 border border-yellow-100 rounded-xl px-4 py-3">
+                <div>
+                    <div class="font-semibold text-sm text-gray-800">${r.elevator_name}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${r.futures_month || '—'}</div>
+                </div>
+                <div class="text-2xl font-bold ${basisClass(r.basis_value)} ml-3">${fmtBasis(r.basis_value)}</div>
+            </div>`).join('');
+        html += `</div>`;
+    }
+
+    if (soy.length) {
+        html += `<p class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">🫘 Soybeans</p>`;
+        html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">`;
+        html += soy.map(r => `
+            <div class="flex items-center justify-between bg-green-50 border border-green-100 rounded-xl px-4 py-3">
+                <div>
+                    <div class="font-semibold text-sm text-gray-800">${r.elevator_name}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${r.futures_month || '—'}</div>
+                </div>
+                <div class="text-2xl font-bold ${basisClass(r.basis_value)} ml-3">${fmtBasis(r.basis_value)}</div>
+            </div>`).join('');
+        html += `</div>`;
+    }
+
+    if (!corn.length && !soy.length) {
+        html = '<p class="text-gray-400 text-sm">No basis data found for this date.</p>';
+    }
+
+    document.getElementById('dayDetailContent').innerHTML = html;
+    const panel = document.getElementById('dayDetail');
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeDayDetail() {
+    calSelectedDate = null;
+    renderCalendar();
+    document.getElementById('dayDetail').classList.add('hidden');
+}
+
+function prevMonth() {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    renderCalendar();
+}
+
+function nextMonth() {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    renderCalendar();
+}
+
+async function loadDealsTable() {
+    const { data: dData } = await db
+        .from('deals')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(200);
 
     const dTbody = document.getElementById('dealHistoryBody');
     if (!dData || dData.length === 0) {
@@ -551,10 +668,9 @@ async function loadHistory() {
                 <td class="px-4 py-2 text-gray-500 text-xs">${r.notes || ''}</td>
             </tr>`).join('');
     }
-
-    buildChart(bData || []);
 }
 
+// ─── Chart ────────────────────────────────────
 function buildChart(rows) {
     const ctx = document.getElementById('basisChart').getContext('2d');
     if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
@@ -628,10 +744,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('bfDate').value = today();
     document.getElementById('dfDate').value = today();
-
-    const d90 = new Date(); d90.setDate(d90.getDate() - 90);
-    document.getElementById('hFrom').value = d90.toISOString().split('T')[0];
-    document.getElementById('hTo').value   = today();
 
     checkConnection();
     loadDashboard();
