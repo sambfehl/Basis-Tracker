@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "WebFetch(domain:www.midiowacoop.com)",
+      "WebFetch(domain:tamabentoncoop.com)",
+      "WebFetch(domain:midiowa.agricharts.com)"
+    ]
+  }
+}
