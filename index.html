@@ -60,6 +60,7 @@
         <button onclick="showTab('graphs')"    id="tab-graphs"    class="tab-btn px-5 py-3 text-sm font-semibold">Graphs</button>
         <button onclick="showTab('deal')"      id="tab-deal"      class="tab-btn px-5 py-3 text-sm font-semibold">Log a Deal</button>
         <button onclick="showTab('history')"   id="tab-history"   class="tab-btn px-5 py-3 text-sm font-semibold">History</button>
+        <button onclick="showTab('trucking')"  id="tab-trucking"  class="tab-btn px-5 py-3 text-sm font-semibold">Trucking</button>
     </div>
 </nav>
 
@@ -182,6 +183,21 @@
                 </button>
                 <p id="dealMsg" class="text-sm text-center h-5"></p>
             </form>
+        </div>
+    </div>
+
+    <!-- ── TRUCKING ──────────────────────────── -->
+    <div id="tab-content-trucking" class="hidden">
+        <div class="bg-white rounded-xl shadow p-6 max-w-2xl">
+            <h2 class="text-base font-semibold text-gray-700 mb-1">Trucking Costs by Location</h2>
+            <p class="text-xs text-gray-400 mb-6">Enter your trucking cost in ¢/bu for each delivery location. Net basis = basis − trucking cost. Saved locally in your browser.</p>
+            <div id="truckingList"><p class="text-gray-400 text-sm">Loading locations…</p></div>
+            <div class="mt-6 flex items-center gap-4">
+                <button onclick="saveTruckingCosts()" class="text-white font-semibold py-2 px-6 rounded-lg transition text-sm" style="background:#2f5438;" onmouseover="this.style.background='#1e3a28'" onmouseout="this.style.background='#2f5438'">
+                    Save Costs
+                </button>
+                <p id="truckingMsg" class="text-sm h-5"></p>
+            </div>
         </div>
     </div>
 
@@ -314,6 +330,7 @@ function showTab(name) {
     if (name === 'dashboard') loadDashboard();
     if (name === 'history')   loadHistory();
     if (name === 'graphs')    loadGraphs();
+    if (name === 'trucking')  loadTrucking();
 }
 
 // ─── Dashboard ────────────────────────────────
@@ -406,17 +423,83 @@ function renderBasisCards(containerId, rows) {
         el.innerHTML = '<p class="text-gray-400 text-sm">No data yet.</p>';
         return;
     }
-    el.innerHTML = rows.map(r => `
+    const costs = getTruckingCosts();
+    el.innerHTML = rows.map(r => {
+        const tc  = costs[r.elevator_name];
+        const net = (tc !== undefined && tc !== '') ? parseFloat(r.basis_value) - parseFloat(tc) : null;
+        return `
         <div class="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
             <div>
                 <div class="font-medium text-gray-800 text-sm">${r.elevator_name}</div>
                 <div class="text-xs text-gray-400">${r.futures_month || '—'} &middot; ${fmtDate(r.date)}</div>
+                ${tc !== undefined && tc !== '' ? `<div class="text-xs text-gray-400 mt-0.5">Trucking: ${parseFloat(tc)}¢/bu</div>` : ''}
             </div>
             <div class="text-right">
                 <div class="text-xl font-bold ${basisClass(r.basis_value)}">${fmtBasis(r.basis_value)}</div>
+                ${net !== null ? `<div class="text-sm font-semibold ${basisClass(net)} mt-0.5">Net: ${fmtBasis(net.toFixed(2))}</div>` : ''}
                 ${r.cash_price ? `<div class="text-xs text-gray-500">$${parseFloat(r.cash_price).toFixed(2)}/bu</div>` : ''}
             </div>
-        </div>`).join('');
+        </div>`;
+    }).join('');
+}
+
+// ─── Trucking Costs ───────────────────────────
+const TRUCKING_KEY = 'basis_tracker_trucking_costs';
+
+function getTruckingCosts() {
+    try { return JSON.parse(localStorage.getItem(TRUCKING_KEY)) || {}; }
+    catch { return {}; }
+}
+
+async function loadTrucking() {
+    const { data } = await db
+        .from('basis_entries')
+        .select('elevator_name')
+        .order('elevator_name');
+
+    const locations = [...new Set((data || []).map(r => r.elevator_name))].sort();
+    const costs     = getTruckingCosts();
+    const el        = document.getElementById('truckingList');
+
+    if (!locations.length) {
+        el.innerHTML = '<p class="text-gray-400 text-sm">No locations found yet.</p>';
+        return;
+    }
+
+    el.innerHTML = `
+        <div class="space-y-3">
+            ${locations.map(loc => `
+                <div class="flex items-center gap-4 py-2 border-b border-gray-100 last:border-0">
+                    <div class="flex-1 text-sm font-medium text-gray-800">${loc}</div>
+                    <div class="flex items-center gap-2">
+                        <input
+                            type="number"
+                            step="0.25"
+                            min="0"
+                            id="tc-${loc.replace(/[^a-z0-9]/gi,'_')}"
+                            data-location="${loc}"
+                            class="input w-28 text-right font-mono"
+                            placeholder="0"
+                            value="${costs[loc] !== undefined ? costs[loc] : ''}"
+                        >
+                        <span class="text-xs text-gray-400 whitespace-nowrap">¢/bu</span>
+                    </div>
+                </div>`).join('')}
+        </div>`;
+}
+
+function saveTruckingCosts() {
+    const inputs = document.querySelectorAll('#truckingList input[data-location]');
+    const costs  = {};
+    inputs.forEach(input => {
+        const val = input.value.trim();
+        if (val !== '') costs[input.dataset.location] = parseFloat(val);
+    });
+    localStorage.setItem(TRUCKING_KEY, JSON.stringify(costs));
+    const msg = document.getElementById('truckingMsg');
+    msg.textContent = 'Saved!';
+    msg.style.color = '#16a34a';
+    setTimeout(() => { msg.textContent = ''; }, 3000);
 }
 
 // ─── Graphs ───────────────────────────────────
